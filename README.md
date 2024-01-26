@@ -1,2 +1,4 @@
 # bacnet-csv-logger
-app to scrape bacnet system inside building continuously, compile a CSV file, and code to run on a different machine to SCP the CSV files across a VPN to a project SharePoint drive
+* BACnet CSV Logger is an asynchronous Python application designed to run on a Linux and continuously scrape data on an interval from a BACnet system within a building. It compiles this data into daily CSV files.
+* In addition to data collection, the app includes functionality to securely transfer these CSV files daily via SCP over a VPN to a SharePoint drive. This ensures centralized and secure data storage.
+* The process involves saving a new CSV file every day on the BACnet system. Subsequently, the previous day's data is transferred, undergoing basic checks and processing before synchronization with SharePoint.
