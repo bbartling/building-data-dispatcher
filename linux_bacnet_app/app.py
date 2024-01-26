@@ -13,8 +13,8 @@ from datetime import datetime
 
 from points import *
 
-
-# python3 app.py --name Slipstream --instance 3056672 --address 10.7.6.201/24:47820
+# examples args for bacpypes3. Run like:
+# $ python3 app.py --name Slipstream --instance 3056672 --address 10.7.6.201/24:47820
 
 
 logging.basicConfig(level=logging.INFO)  
@@ -41,10 +41,14 @@ class ReaderApp:
         
     async def share_data_to_bacnet_server(self):
         # BACnet server processes
+        # not used at the moment but could be if some external
+        # platform monitored the state via BACnet
         return self.app_state
 
     async def update_bacnet_server_values(self):
         # BACnet server processes
+        # not used at the moment but could be if some external
+        # platform monitored the state via BACnet
         while True:
             await asyncio.sleep(1)
             self.app_status.presentValue = await self.share_data_to_bacnet_server()
@@ -74,12 +78,12 @@ class ReaderApp:
     async def do_read_property_task(self, requests):
         read_values = []
 
-        logging.info(" READ_REQUESTS GO!!!")
-
         for request in requests:
             try:
                 # Destructure the request into its components
                 address, object_id, prop_id, array_index, point_name = request
+                
+                logging.info(" {address} {point_name} GO!")
                 
                 if _debug:
                     logging.info(f" {address} \n {object_id} \n {prop_id} \n {array_index} \n {point_name}")
@@ -88,7 +92,7 @@ class ReaderApp:
                 value = await self.app.read_property(
                     address, object_id, prop_id, array_index
                 )
-                logging.info(f" Read value for {point_name}: {value}")
+                logging.info(f" Read request {point_name}: {value}")
 
                 # Append the result to the read_values list
                 read_values.append((value, point_name))
@@ -106,22 +110,29 @@ class ReaderApp:
         return read_values
 
 
-    async def dataset_maker(self):
-        
+    async def scrape_device(self, device_name, device_config):
+        device_address = device_config['address']
+        scrape_interval = device_config['scrape_interval']
+        device_requests = [
+            (device_address, point_obj, BACNET_PRESENT_VALUE_PROP_IDENTIFIER, 
+            BACNET_PROPERTY_ARRAY_INDEX, f"{device_name}_{point_name.lower()}")
+            for point_name, point_obj in device_config['points']
+        ]
+
         while True:
-
-            # unpack the 3 values from the BACnet read requests
-            data = await self.do_read_property_task(
-                READ_REQUESTS
-            )
-
+            data = await self.do_read_property_task(device_requests)
             time = datetime.now().isoformat()
-            
-            logging.info(" time: %r", time)
-            logging.info(" data: %r", data)
-            
+            logging.info(f"time: {time}, data: {data}")
             await self.write_to_csv(data, time)
-            await asyncio.sleep(60)
+            await asyncio.sleep(scrape_interval)
+
+    async def dataset_maker(self):
+        tasks = []
+        for device, config in devices.items():
+            task = asyncio.create_task(self.scrape_device(device, config))
+            tasks.append(task)
+        
+        await asyncio.gather(*tasks)
 
 
 async def main():
