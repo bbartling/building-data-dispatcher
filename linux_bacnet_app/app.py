@@ -24,6 +24,8 @@ _debug = 0
 class ReaderApp:
     def __init__(self, args, app_status):
 
+        self.current_file_date = datetime.today().date()
+        self.lock = asyncio.Lock()
         
         super().__init__()
 
@@ -59,21 +61,34 @@ class ReaderApp:
         if not os.path.exists(data_dir):
             os.makedirs(data_dir)
 
-        csv_file_path = os.path.join(data_dir, 'bacnet_data.csv')
+        # Check if the date has changed
+        current_date = datetime.today().date()
+        if current_date != self.current_file_date:
+            # Update the current file date
+            self.current_file_date = current_date
 
-        # Check if the file exists and has content
-        file_exists = os.path.exists(csv_file_path) and os.path.getsize(csv_file_path) > 0
+            # Close the old file and start a new one
+            new_file_name = f"bacnet_data_{current_date.strftime('%Y_%m_%d')}.csv"
+            csv_file_path = os.path.join(data_dir, new_file_name)
+        else:
+            # Continue using the same file as before
+            csv_file_path = os.path.join(data_dir, 'bacnet_data.csv')
 
-        async with aiofiles.open(csv_file_path, mode='a', newline='') as file:
-            # Write the headers if the file is new
-            if not file_exists:
-                await file.write(','.join(['Time', 'Point Name', 'Value']) + '\n')
+        # thread safety attempt with ayncio Lock
+        async with self.lock:
+            # Check if the file exists and has content
+            file_exists = os.path.exists(csv_file_path) and os.path.getsize(csv_file_path) > 0
 
-            # Write the scraped data
-            for value, point_name in data:
-                await file.write(','.join([time, point_name, str(value)]) + '\n')
+            async with aiofiles.open(csv_file_path, mode='a', newline='') as file:
+                # Write the headers if the file is new
+                if not file_exists:
+                    await file.write(','.join(['Time', 'Point Name', 'Value']) + '\n')
 
-        logging.info(" CSV WRITER DONE!!!")
+                # Write the scraped data
+                for value, point_name in data:
+                    await file.write(','.join([time, point_name, str(value)]) + '\n')
+
+            logging.info("CSV WRITER DONE!!!")
         
     async def do_read_property_task(self, requests):
         read_values = []
