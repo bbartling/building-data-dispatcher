@@ -83,7 +83,7 @@ class ReaderApp:
                 # Destructure the request into its components
                 address, object_id, prop_id, array_index, point_name = request
                 
-                logging.info(" {address} {point_name} GO!")
+                logging.info(f" {address} {point_name} GO!")
                 
                 if _debug:
                     logging.info(f" {address} \n {object_id} \n {prop_id} \n {array_index} \n {point_name}")
