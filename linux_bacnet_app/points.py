@@ -22,8 +22,8 @@ devices = {
         "points": [
             ("DUCT_TEMP", DUCT_TEMP),
             ("ZONE_SETPOINT", ZONE_SETPOINT),
-            ("OUT_TEMP", OUT_TEMP)
-        ]
+            ("OUT_TEMP", OUT_TEMP),
+        ],
     },
     "device2": {
         "address": Address("12345:6"),
@@ -31,8 +31,8 @@ devices = {
         "points": [
             ("DUCT_TEMP", DUCT_TEMP),
             ("ZONE_SETPOINT", ZONE_SETPOINT),
-            ("OUT_TEMP", OUT_TEMP)
-        ]
+            ("OUT_TEMP", OUT_TEMP),
+        ],
     },
     # Add more devices here
 }
