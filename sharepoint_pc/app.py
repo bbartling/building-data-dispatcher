@@ -70,10 +70,7 @@ def concatenate_csv_files(raw_data_path, processed_file_path):
     # Read and concatenate all CSV files into one DataFrame
     df_list = [pd.read_csv(file) for file in csv_files]
     combined_df = pd.concat(df_list, ignore_index=True)
-
-    # Save the combined DataFrame to a single CSV file
-    combined_df.to_csv(processed_file_path, index=False)
-    print(f"Combined data saved to {processed_file_path}")
+    print("Concat CSV files done")
 
 
 def scp_files(ssh_client, remote_files, LOCAL_PATH):
@@ -90,8 +87,20 @@ def scp_files(ssh_client, remote_files, LOCAL_PATH):
 
 
 def process_csv(file_path):
-    # Read the CSV data, skipping any duplicated header row
-    df = pd.read_csv(file_path, skiprows=lambda x: x == 1)
+    # Expected column names
+    expected_columns = ["Time", "Point Name", "Value"]
+
+    # Read the first row to check if it contains the column names
+    with open(file_path, 'r') as f:
+        first_row = f.readline().strip().split(',')
+
+    # Check if the first row matches the expected column names
+    if first_row != expected_columns:
+        # If not, read the CSV with no header and manually set the column names
+        df = pd.read_csv(file_path, header=None, names=expected_columns)
+    else:
+        # If yes, read the CSV normally
+        df = pd.read_csv(file_path)
 
     # Convert 'Time' to datetime, coercing errors to NaT
     df["Time"] = pd.to_datetime(
@@ -115,9 +124,7 @@ def process_csv(file_path):
     os.makedirs(processed_directory, exist_ok=True)
 
     # Save to a new CSV file in the processed_data subdirectory
-    processed_file_name = (
-        os.path.splitext(os.path.basename(file_path))[0] + "_processed.csv"
-    )
+    processed_file_name = ("processed_data.csv")
     processed_file_path = os.path.join(processed_directory, processed_file_name)
     pivoted_df.to_csv(processed_file_path)
 
@@ -143,8 +150,7 @@ def main():
         remote_files = list_csv_files(ssh_client, REMOTE_PATH)
         print("remote_files \n", remote_files)
 
-        # Exclude 'bacnet_data.csv' and compare with 
-        # local files to decide which files to transfer
+        # Exclude 'bacnet_data.csv' and compare with local files to decide which files to transfer
         files_to_transfer = [
             file
             for file in remote_files
@@ -170,8 +176,7 @@ def main():
                 processed_directory, "combined_processed_data.csv"
             )
 
-            # Concatenate all CSV files in raw_data 
-            # and save to processed_data
+            # Concatenate all CSV files in raw_data and save to processed_data
             concatenate_csv_files(raw_data_directory, processed_file_path)
         else:
             print("No files to transfer over or process")
