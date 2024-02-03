@@ -3,6 +3,16 @@ from bacpypes3.local.binary import BinaryValueObject
 from bacpypes3.app import Application
 from bacpypes3.apdu import ErrorRejectAbortNack
 from bacpypes3.local.binary import BinaryValueObject
+from bacpypes3.vendor import get_vendor_info
+from bacpypes3.apdu import (
+    ErrorRejectAbortNack,
+    PropertyReference,
+    PropertyIdentifier,
+    ErrorType,
+)
+
+from bacpypes3.pdu import Address
+from bacpypes3.primitivedata import ObjectIdentifier
 
 import asyncio
 import os
@@ -11,12 +21,17 @@ import logging
 import aiofiles
 from datetime import datetime
 import psutil
+from typing import Callable, List, Optional, Tuple
 
 from points import *
+import yaml
 
 # examples args for bacpypes3. Run like:
 # $ python3 app.py --name Slipstream --instance 3056672 --address 10.7.6.201/24:47820
 
+# Define BACnet properties
+BACNET_PRESENT_VALUE_PROP_IDENTIFIER = "present-value"
+BACNET_PROPERTY_ARRAY_INDEX = None
 
 logging.basicConfig(level=logging.INFO)  
 
@@ -36,6 +51,8 @@ class ReaderApp:
         self.app.add_object(app_status)
         self.app_state = "active"
         
+        self.devices_config = self.load_yaml_config("configs/bacnet_config_201201.yaml")
+        
         # Start the openleadr client
         asyncio.create_task(self.dataset_maker())
 
@@ -51,6 +68,7 @@ class ReaderApp:
         # platform monitored the state via BACnet
         return self.app_state
 
+
     async def update_bacnet_server_values(self):
         # BACnet server processes
         # not used at the moment but could be if some external
@@ -58,6 +76,43 @@ class ReaderApp:
         while True:
             await asyncio.sleep(1)
             self.app_status.presentValue = await self.share_data_to_bacnet_server()
+
+
+    def load_yaml_config(self, filename):
+        with open(filename, 'r') as file:
+            config = yaml.safe_load(file)
+
+        for device in config["devices"]:
+            device["address"] = Address(device["address"])
+
+            for point in device["points"]:
+                obj_id_parts = point["object_identifier"].split(',')
+                if len(obj_id_parts) == 2:
+                    point["object_identifier"] = ObjectIdentifier(f"{obj_id_parts[0]},{int(obj_id_parts[1])}")
+                else:
+                    logging.error(f"Invalid object identifier format: {point['object_identifier']}")
+
+        return config
+
+    
+    async def log_system_metrics(self):
+        while True:
+            timestamp = datetime.now().isoformat()
+            cpu_usage = psutil.cpu_percent(interval=1)
+            memory_usage = psutil.virtual_memory().percent
+            disk_usage = psutil.disk_usage('/').percent
+            # Add more metrics if needed
+
+            system_metrics = [
+                (timestamp, 'CPU Usage', cpu_usage),
+                (timestamp, 'Memory Usage', memory_usage),
+                (timestamp, 'Disk Usage', disk_usage),
+                # Add more metrics here
+            ]
+
+            await self.write_to_csv(system_metrics, is_system_metrics=True)
+            await asyncio.sleep(600)
+
 
     async def write_to_csv(self, data, is_system_metrics=False):
         current_date = datetime.today().date()
@@ -96,9 +151,10 @@ class ReaderApp:
 
             logging.info("CSV WRITER DONE!!!")
 
-
+        
     async def do_read_property_task(self, requests):
         read_values = []
+        print(f" requests {requests} ")
 
         for request in requests:
             try:
@@ -106,9 +162,6 @@ class ReaderApp:
                 address, object_id, prop_id, array_index, point_name = request
                 
                 logging.info(f" {address} {point_name} GO!")
-                
-                if _debug:
-                    logging.info(f" {address} \n {object_id} \n {prop_id} \n {array_index} \n {point_name}")
 
                 # Perform the BACnet read property operation
                 value = await self.app.read_property(
@@ -131,55 +184,47 @@ class ReaderApp:
 
         return read_values
 
+
     async def scrape_device(self, device_name, device_config):
-        device_address = device_config['address']
         scrape_interval = device_config['scrape_interval']
-        device_requests = [
-            (device_address, point_obj, BACNET_PRESENT_VALUE_PROP_IDENTIFIER, 
-            BACNET_PROPERTY_ARRAY_INDEX, f"{device_name}_{point_name.lower()}")
-            for point_name, point_obj in device_config['points']
-        ]
+        read_multiple = device_config.get('read_multiple', False)
+        device_address = device_config['address']
 
         while True:
-            data = await self.do_read_property_task(device_requests)
-            timestamp = datetime.now().isoformat()
-            # Update data to include timestamp in each tuple
-            data_with_timestamp = [(timestamp, point_name, value) for value, point_name in data]
-            logging.info(f"time: {timestamp}, data: {data_with_timestamp}")
-            await self.write_to_csv(data_with_timestamp, is_system_metrics=False)
-            await asyncio.sleep(scrape_interval)
+            if read_multiple:
+                print("passing on this device service not implemented yet...")
+            else:
+                device_requests = [
+                    (device_address, ObjectIdentifier(point['object_identifier']), 
+                    BACNET_PRESENT_VALUE_PROP_IDENTIFIER, BACNET_PROPERTY_ARRAY_INDEX, 
+                    f"{device_name}_{point['object_name'].lower()}")
+                    for point in device_config['points']
+                ]
+                data = await self.do_read_property_task(device_requests)
 
+            if data is not None:
+                timestamp = datetime.now().isoformat()
+                data_with_timestamp = [(timestamp, point_name, value) for value, point_name in data]
+                logging.info(f"time: {timestamp}, data: {data_with_timestamp}")
+
+                await self.write_to_csv(data_with_timestamp, is_system_metrics=False)
+                
+            await asyncio.sleep(scrape_interval)
+            
 
     async def dataset_maker(self):
         tasks = []
-        for device, config in devices.items():
-            task = asyncio.create_task(self.scrape_device(device, config))
+        for device_config in self.devices_config["devices"]:
+            device_name = device_config["device_identifier"]
+            task = asyncio.create_task(self.scrape_device(device_name, device_config))
             tasks.append(task)
         
         await asyncio.gather(*tasks)
 
-    async def log_system_metrics(self):
-        while True:
-            timestamp = datetime.now().isoformat()
-            cpu_usage = psutil.cpu_percent(interval=1)
-            memory_usage = psutil.virtual_memory().percent
-            disk_usage = psutil.disk_usage('/').percent
-            # Add more metrics if needed
-
-            system_metrics = [
-                (timestamp, 'CPU Usage', cpu_usage),
-                (timestamp, 'Memory Usage', memory_usage),
-                (timestamp, 'Disk Usage', disk_usage),
-                # Add more metrics here
-            ]
-
-            await self.write_to_csv(system_metrics, is_system_metrics=True)
-            await asyncio.sleep(600)
 
 async def main():
     args = SimpleArgumentParser().parse_args()
-    if _debug:
-        logging.debug("args: %r", args)
+    logging.debug("args: %r", args)
 
     app_status = BinaryValueObject(
         objectIdentifier=("binaryValue", 1),
@@ -194,8 +239,7 @@ async def main():
         args,
         app_status=app_status,
     )
-    if _debug:
-        logging.debug("app: %r", app)
+    logging.debug("app: %r", app)
 
     await asyncio.Future()
 
