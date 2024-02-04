@@ -107,7 +107,9 @@ class SampleCmd(Cmd):
 
     async def do_save_device_config(self, instance_id: int, filename=None):
         """
-        Save the discovered points to a YAML file, named based on the instance ID.
+        Save the discovered points to a YAML file, named based on the instance ID,
+        including the device name for the device identifier entry.
+        If the device name is not found, default to the instance ID as a string.
         """
         config_dir = "configs"
         os.makedirs(config_dir, exist_ok=True)
@@ -121,17 +123,31 @@ class SampleCmd(Cmd):
 
         # Combine object_list and names_list into a single structure
         points_data = []
-        for obj, name in zip(object_list, names_list):
+        device_name = str(instance_id)  # Default to instance_id as string
+
+        for index, (obj_type, obj_id) in enumerate(object_list):
+            if _debug:
+                _log.debug(f" index {index} ")
+                _log.debug(f" obj_type, obj_id {(obj_type, obj_id)}")
+            
+            name = names_list[index]
             point_data = {
-                "object_identifier": str(obj[0]) + "," + str(obj[1]),  # Assuming obj is a tuple
+                "object_identifier": f"{obj_type},{obj_id}",
                 "object_name": name
             }
             points_data.append(point_data)
+            obj_type_str = str(obj_type)
+            
+            # Check if this entry is the device identifier and get the name from names_list
+            if obj_type_str == "device" and obj_id == instance_id:
+                device_name = names_list[index]
+    
 
         config_data = {
             "devices": [
                 {
                     "device_identifier": str(instance_id),
+                    "device_name": device_name,  # Add device name or instance_id here
                     "address": str(device_address),
                     "scrape_interval": 60,  # Default value
                     "read_multiple": True,  # Default value

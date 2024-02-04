@@ -79,20 +79,25 @@ class ReaderApp:
 
 
     def load_yaml_config(self, filename):
-        with open(filename, 'r') as file:
-            config = yaml.safe_load(file)
+        try:
+            with open(filename, 'r') as file:
+                config = yaml.safe_load(file)
 
-        for device in config["devices"]:
-            device["address"] = Address(device["address"])
+            for device in config["devices"]:
+                device["address"] = Address(device["address"])
 
-            for point in device["points"]:
-                obj_id_parts = point["object_identifier"].split(',')
-                if len(obj_id_parts) == 2:
-                    point["object_identifier"] = ObjectIdentifier(f"{obj_id_parts[0]},{int(obj_id_parts[1])}")
-                else:
-                    logging.error(f"Invalid object identifier format: {point['object_identifier']}")
+                for point in device["points"]:
+                    obj_id_parts = point["object_identifier"].split(',')
+                    if len(obj_id_parts) == 2:
+                        point["object_identifier"] = ObjectIdentifier(f"{obj_id_parts[0]},{int(obj_id_parts[1])}")
+                    else:
+                        logging.error(f"Invalid object identifier format: {point['object_identifier']}")
 
-        return config
+            return config
+
+        except Exception as e:
+            logging.error(f"Error loading YAML config: {e}")
+            raise
 
     
     async def log_system_metrics(self):
@@ -104,15 +109,15 @@ class ReaderApp:
             # Add more metrics if needed
 
             system_metrics = [
-                (timestamp, 'CPU Usage', cpu_usage),
-                (timestamp, 'Memory Usage', memory_usage),
-                (timestamp, 'Disk Usage', disk_usage),
+                (timestamp, 'Pi_CPU_Usage', cpu_usage),
+                (timestamp, 'Pi_Memory_Usage', memory_usage),
+                (timestamp, 'Pi_Disk_Usage', disk_usage),
                 # Add more metrics here
             ]
 
             await self.write_to_csv(system_metrics, is_system_metrics=True)
-            await asyncio.sleep(600)
-
+            await asyncio.sleep(3600)
+            
 
     async def write_to_csv(self, data, is_system_metrics=False):
         current_date = datetime.today().date()
@@ -154,14 +159,12 @@ class ReaderApp:
         
     async def do_read_property_task(self, requests):
         read_values = []
-        print(f" requests {requests} ")
+        logging.info(f" requests {requests} ")
 
         for request in requests:
             try:
                 # Destructure the request into its components
                 address, object_id, prop_id, array_index, point_name = request
-                
-                logging.info(f" {address} {point_name} GO!")
 
                 # Perform the BACnet read property operation
                 value = await self.app.read_property(
@@ -185,14 +188,16 @@ class ReaderApp:
         return read_values
 
 
-    async def scrape_device(self, device_name, device_config):
+    async def scrape_device(self, device_config):
         scrape_interval = device_config['scrape_interval']
         read_multiple = device_config.get('read_multiple', False)
         device_address = device_config['address']
+        device_name = device_config["device_name"]
 
         while True:
             if read_multiple:
-                print("passing on this device service not implemented yet...")
+                logging.info("passing on this device service not implemented yet...")
+                data = None
             else:
                 device_requests = [
                     (device_address, ObjectIdentifier(point['object_identifier']), 
@@ -215,8 +220,7 @@ class ReaderApp:
     async def dataset_maker(self):
         tasks = []
         for device_config in self.devices_config["devices"]:
-            device_name = device_config["device_identifier"]
-            task = asyncio.create_task(self.scrape_device(device_name, device_config))
+            task = asyncio.create_task(self.scrape_device(device_config))
             tasks.append(task)
         
         await asyncio.gather(*tasks)
