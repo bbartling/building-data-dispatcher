@@ -22,9 +22,8 @@ import aiofiles
 from datetime import datetime
 import psutil
 from typing import Callable, List, Optional, Tuple
-
-from points import *
 import yaml
+import traceback
 
 # examples args for bacpypes3. Run like:
 # $ python3 app.py --name Slipstream --instance 3056672 --address 10.7.6.201/24:47820
@@ -33,7 +32,7 @@ import yaml
 BACNET_PRESENT_VALUE_PROP_IDENTIFIER = "present-value"
 BACNET_PROPERTY_ARRAY_INDEX = None
 
-logging.basicConfig(level=logging.INFO)  
+logging.basicConfig(level=logging.DEBUG)
 
 _debug = 0
 
@@ -188,6 +187,123 @@ class ReaderApp:
         return read_values
 
 
+    async def read_property_multiple_task(self, address, *args):
+        logging.debug(f"args: {args}")
+
+        if len(args) == 1 and isinstance(args[0], tuple):
+            args = args[0]
+
+        # Convert args tuple directly to a list without pairing
+        args_list = list(args)
+        logging.debug(f"args_list: {args_list}")
+
+        # get information about the device from the cache
+        device_info = await self.app.device_info_cache.get_device_info(address)
+
+        # using the device info, look up the vendor information
+        if device_info:
+            vendor_info = get_vendor_info(device_info.vendor_identifier)
+        else:
+            vendor_info = get_vendor_info(0)
+
+        parameter_list = []
+        while args_list:
+            # use the vendor information to translate the object identifier,
+            # then use the object type portion to look up the object class
+            object_identifier = vendor_info.object_identifier(args_list.pop(0))
+            object_class = vendor_info.get_object_class(object_identifier[0])
+            if not object_class:
+                logging.debug(f" unrecognized object type: {object_identifier}")
+                return
+
+            # save this as a parameter
+            parameter_list.append(object_identifier)
+
+            property_reference_list = []
+            while args_list:
+                # use the vendor info to parse the property reference
+                property_reference = PropertyReference(
+                    args_list.pop(0),
+                    vendor_info=vendor_info,
+                )
+                if _debug:
+                    logging.debug("    - property_reference: %r", property_reference)
+
+                if property_reference.propertyIdentifier not in (
+                    PropertyIdentifier.all,
+                    PropertyIdentifier.required,
+                    PropertyIdentifier.optional,
+                ):
+                    property_type = object_class.get_property_type(
+                        property_reference.propertyIdentifier
+                    )
+                    if _debug:
+                        logging.debug("    - property_type: %r", property_type)
+                        logging.debug("    - property_reference.propertyIdentifier: %r", property_reference.propertyIdentifier)
+                    if not property_type:
+                        logging.debug(
+                            f"unrecognized property: {property_reference.propertyIdentifier}"
+                        )
+                        return
+
+                # save this as a parameter
+                property_reference_list.append(property_reference)
+
+                # crude check to see if the next thing is an object identifier
+                if args_list and ((":" in args_list[0]) or ("," in args_list[0])):
+                    break
+
+            # save this as a parameter
+            parameter_list.append(property_reference_list)
+
+
+        if not parameter_list:
+            await self.response("object identifier expected")
+            return
+
+        try:
+            
+            response = await self.app.read_property_multiple(address, parameter_list)
+
+        except ErrorRejectAbortNack as err:
+            if _debug:
+                logging.debug("    - exception: %r", err)
+            return
+
+        # dump out the results
+        for (
+            object_identifier,
+            property_identifier,
+            property_array_index,
+            property_value,
+        ) in response:
+            if property_array_index is not None:
+                logging.debug(
+                    f" rpm {object_identifier} {property_identifier}[{property_array_index}] {property_value}"
+                )
+            else:
+                logging.debug(
+                    f" rpm {object_identifier} {property_identifier} {property_value}"
+                )
+            if isinstance(property_value, ErrorType):
+                logging.debug(
+                    f" rpm error - {property_value.errorClass}, {property_value.errorCode}"
+                )
+        
+        return response
+
+    def format_rpm_data(self, rpm_data, timestamp):
+        formatted_data = []
+        for obj_identifier, prop_identifier, _, value in rpm_data:
+            # Extract the object type and instance number
+            obj_type, instance = obj_identifier
+            point_name = f"{obj_type},{instance}_{prop_identifier}"
+
+            formatted_data.append((timestamp, point_name, value))
+
+        return formatted_data
+
+
     async def scrape_device(self, device_config):
         scrape_interval = device_config['scrape_interval']
         read_multiple = device_config.get('read_multiple', False)
@@ -196,26 +312,50 @@ class ReaderApp:
 
         while True:
             if read_multiple:
-                logging.info("passing on this device service not implemented yet...")
-                data = None
+                # Define device_requests for RPM in the flattened format
+                device_requests = []
+                for point in device_config['points']:
+                    # Assuming point['object_identifier'] is a tuple-like ObjectIdentifier
+                    object_type, instance = point['object_identifier']
+
+                    # Format object_type and instance into the required string format
+                    object_type_instance_str = f"{object_type},{instance}"
+
+                    # Add to the device_requests
+                    device_requests.extend([object_type_instance_str, BACNET_PRESENT_VALUE_PROP_IDENTIFIER])
+
+                # Call read_property_multiple_task with unpacked arguments
+                data = await self.read_property_multiple_task(device_address, *device_requests)
+                logging.info(f" rpm data: {data}")
+
+                if data is not None:
+                    timestamp = datetime.now().isoformat()
+                    formatted_data = self.format_rpm_data(data, timestamp)
+                    logging.info(f"time: {timestamp}, data: {formatted_data}")
+
+                    await self.write_to_csv(formatted_data, is_system_metrics=False)
+
             else:
+                # Define device_requests for non-RPM
                 device_requests = [
                     (device_address, ObjectIdentifier(point['object_identifier']), 
                     BACNET_PRESENT_VALUE_PROP_IDENTIFIER, BACNET_PROPERTY_ARRAY_INDEX, 
                     f"{device_name}_{point['object_name'].lower()}")
                     for point in device_config['points']
                 ]
-                data = await self.do_read_property_task(device_requests)
-
-            if data is not None:
-                timestamp = datetime.now().isoformat()
-                data_with_timestamp = [(timestamp, point_name, value) for value, point_name in data]
-                logging.info(f"time: {timestamp}, data: {data_with_timestamp}")
-
-                await self.write_to_csv(data_with_timestamp, is_system_metrics=False)
                 
-            await asyncio.sleep(scrape_interval)
+                data = await self.do_read_property_task(device_requests)
+                logging.info(f" no rpm data: {data}")
+                
+                if data is not None:
+                    timestamp = datetime.now().isoformat()
+                    data_with_timestamp = [(timestamp, point_name, value) for value, point_name in data]
+                    logging.info(f"time: {timestamp}, data: {data_with_timestamp}")
+
+                    await self.write_to_csv(data_with_timestamp, is_system_metrics=False)
             
+            await asyncio.sleep(scrape_interval)
+
 
     async def dataset_maker(self):
         tasks = []

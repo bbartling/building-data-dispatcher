@@ -31,7 +31,7 @@ test whohas
 > whohas "ZN-T"
 
 test read multiple
-> rpm 32:18 analog-output,2 present-value analog-value,14 present-value
+> rpm 12345:2 analog-input,2 present-value analog-value,301 present-value
 > rpm 10.7.6.161/24:47820 analog-value,99 present-value analog-value,1 present-value
 
 discover points on device 201201
@@ -43,6 +43,7 @@ discover networks in the building
 import os
 import asyncio
 import re
+from collections import OrderedDict
 import yaml
 from typing import Callable, List, Optional, Tuple
 
@@ -77,6 +78,8 @@ from bacpypes3.netservice import NetworkAdapter
 from bacpypes3.ipv4.bvll import Result as IPv4BVLLResult
 from bacpypes3.ipv4.service import BVLLServiceAccessPoint, BVLLServiceElement
 
+from enum import Enum
+
 # some debugging
 _debug = 0
 _log = ModuleLogger(globals())
@@ -94,6 +97,8 @@ bvll_ase: Optional[BVLLServiceElement] = None
 
 # Define a list to store command history
 command_history = []
+
+DEFAULT_SCRAPE_INTERVAL = 300 # seconds
 
 
 @bacpypes_debugging
@@ -127,34 +132,38 @@ class SampleCmd(Cmd):
 
         for index, (obj_type, obj_id) in enumerate(object_list):
             if _debug:
-                _log.debug(f" index {index} ")
-                _log.debug(f" obj_type, obj_id {(obj_type, obj_id)}")
-            
+                _log.debug(f"index {index}")
+                _log.debug(f"obj_type, obj_id {obj_type}, {obj_id}")
+
             name = names_list[index]
             point_data = {
                 "object_identifier": f"{obj_type},{obj_id}",
                 "object_name": name
             }
             points_data.append(point_data)
-            obj_type_str = str(obj_type)
-            
-            # Check if this entry is the device identifier and get the name from names_list
-            if obj_type_str == "device" and obj_id == instance_id:
-                device_name = names_list[index]
-    
 
-        config_data = {
-            "devices": [
-                {
-                    "device_identifier": str(instance_id),
-                    "device_name": device_name,  # Add device name or instance_id here
-                    "address": str(device_address),
-                    "scrape_interval": 60,  # Default value
-                    "read_multiple": True,  # Default value
-                    "points": points_data
-                }
-            ]
-        }
+            # Update the comparison to match the actual data types
+            if isinstance(obj_type, Enum):  # Replace 'Enum' with the actual type of obj_type, if necessary
+                type_name = obj_type.name  # Or use the appropriate attribute/method
+            else:
+                type_name = str(obj_type)
+
+            if type_name == "device" and obj_id == instance_id:
+                device_name = name
+                break  # Found the device name
+
+        config_data = OrderedDict([
+            ("devices", [
+                OrderedDict([
+                    ("device_identifier", str(instance_id)),
+                    ("device_name", device_name),  # Add device name or instance_id here
+                    ("address", str(device_address)),
+                    ("scrape_interval", 60),  # Default value
+                    ("read_multiple", True),  # Default value
+                    ("points", points_data)
+                ])
+            ])
+        ])
 
         with open(filename, 'w') as file:
             yaml.dump(config_data, file, default_flow_style=False)
@@ -590,10 +599,10 @@ class SampleCmd(Cmd):
         Read Property Multiple
         usage: rpm address ( objid ( prop[indx] )... )...
         """
-
+        print(f" args {args}")
         args_list: List[str] = list(args)
         
-        print(f"{address} {args_list}")
+        print(f" args_list {args_list}")
 
         # get information about the device from the cache
         device_info = await app.device_info_cache.get_device_info(address)
@@ -611,7 +620,7 @@ class SampleCmd(Cmd):
             object_identifier = vendor_info.object_identifier(args_list.pop(0))
             object_class = vendor_info.get_object_class(object_identifier[0])
             if not object_class:
-                await self.response(f"unrecognized object type: {object_identifier}")
+                _log.debug(f" unrecognized object type: {object_identifier}")
                 return
 
             # save this as a parameter
@@ -639,7 +648,7 @@ class SampleCmd(Cmd):
                         _log.debug("    - property_type: %r", property_type)
                         _log.debug("    - property_reference.propertyIdentifier: %r", property_reference.propertyIdentifier)
                     if not property_type:
-                        await self.response(
+                        _log.debug(
                             f"unrecognized property: {property_reference.propertyIdentifier}"
                         )
                         return
