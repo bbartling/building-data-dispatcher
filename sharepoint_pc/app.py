@@ -91,8 +91,8 @@ def process_csv(file_path):
     expected_columns = ["Time", "Point Name", "Value"]
 
     # Read the first row to check if it contains the column names
-    with open(file_path, 'r') as f:
-        first_row = f.readline().strip().split(',')
+    with open(file_path, "r") as f:
+        first_row = f.readline().strip().split(",")
 
     # Check if the first row matches the expected column names
     if first_row != expected_columns:
@@ -124,7 +124,7 @@ def process_csv(file_path):
     os.makedirs(processed_directory, exist_ok=True)
 
     # Save to a new CSV file in the processed_data subdirectory
-    processed_file_name = ("processed_data.csv")
+    processed_file_name = "processed_data.csv"
     processed_file_path = os.path.join(processed_directory, processed_file_name)
     pivoted_df.to_csv(processed_file_path)
 

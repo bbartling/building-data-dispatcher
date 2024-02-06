@@ -1,8 +1,21 @@
 """
-Bens tester. 
+Example usage
 
-run on static IP for UDP port 47820
+Bring up the bacpypes3 console with debug
+$ python3 tester.py --debug
+
+run on static IP for UDP port 47820 with passing in Address arg
 $ python3 tester.py --address 10.7.6.201/24:47820 --debug
+
+See all available commands
+> help
+
+save BACnet device yaml config file
+pass in the BACnet instance ID
+> do_save_device_config 201201
+
+discover points on device 201201
+> point_discovery 792000
 
 read priority arr of a point
 > read_point_priority_arr 32:18 analog-value,13
@@ -34,12 +47,10 @@ test read multiple
 > rpm 12345:2 analog-input,2 present-value analog-value,301 present-value
 > rpm 10.7.6.161/24:47820 analog-value,99 present-value analog-value,1 present-value
 
-discover points on device 201201
-> point_discovery 792000
-
 discover networks in the building
 > who_is_router_to_network
 """
+
 import os
 import asyncio
 import re
@@ -98,7 +109,7 @@ bvll_ase: Optional[BVLLServiceElement] = None
 # Define a list to store command history
 command_history = []
 
-DEFAULT_SCRAPE_INTERVAL = 300 # seconds
+DEFAULT_SCRAPE_INTERVAL = 300  # seconds
 
 
 @bacpypes_debugging
@@ -108,7 +119,6 @@ class SampleCmd(Cmd):
     """
 
     _debug: Callable[..., None]
-
 
     async def do_save_device_config(self, instance_id: int, filename=None):
         """
@@ -122,7 +132,9 @@ class SampleCmd(Cmd):
         if filename is None:
             filename = f"{config_dir}/bacnet_config_{instance_id}.yaml"
 
-        device_address, object_list, names_list = await self.do_point_discovery(instance_id)
+        device_address, object_list, names_list = await self.do_point_discovery(
+            instance_id
+        )
         if not object_list:
             return
 
@@ -138,12 +150,14 @@ class SampleCmd(Cmd):
             name = names_list[index]
             point_data = {
                 "object_identifier": f"{obj_type},{obj_id}",
-                "object_name": name
+                "object_name": name,
             }
             points_data.append(point_data)
 
             # Update the comparison to match the actual data types
-            if isinstance(obj_type, Enum):  # Replace 'Enum' with the actual type of obj_type, if necessary
+            if isinstance(
+                obj_type, Enum
+            ):  # Replace 'Enum' with the actual type of obj_type, if necessary
                 type_name = obj_type.name  # Or use the appropriate attribute/method
             else:
                 type_name = str(obj_type)
@@ -152,25 +166,34 @@ class SampleCmd(Cmd):
                 device_name = name
                 break  # Found the device name
 
-        config_data = OrderedDict([
-            ("devices", [
-                OrderedDict([
-                    ("device_identifier", str(instance_id)),
-                    ("device_name", device_name),  # Add device name or instance_id here
-                    ("address", str(device_address)),
-                    ("scrape_interval", 60),  # Default value
-                    ("read_multiple", True),  # Default value
-                    ("points", points_data)
-                ])
-            ])
-        ])
+        config_data = OrderedDict(
+            [
+                (
+                    "devices",
+                    [
+                        OrderedDict(
+                            [
+                                ("device_identifier", str(instance_id)),
+                                (
+                                    "device_name",
+                                    device_name,
+                                ),  # Add device name or instance_id here
+                                ("address", str(device_address)),
+                                ("scrape_interval", 60),  # Default value
+                                ("read_multiple", True),  # Default value
+                                ("points", points_data),
+                            ]
+                        )
+                    ],
+                )
+            ]
+        )
 
-        with open(filename, 'w') as file:
+        with open(filename, "w") as file:
             yaml.dump(config_data, file, default_flow_style=False)
 
         if _debug:
             _log.debug(f"Configuration for device {instance_id} saved to {filename}")
-
 
     async def do_point_discovery(
         self,
@@ -196,7 +219,7 @@ class SampleCmd(Cmd):
             _log.debug("    - device_address: %r", device_address)
             _log.debug("    - device_identifier: %r", device_identifier)
             _log.debug("    - vendor_info: %r", vendor_info)
-            
+
         object_list = []
         names_list = []
 
@@ -216,12 +239,12 @@ class SampleCmd(Cmd):
             return []
 
         if not object_list:
-            
+
             if _debug:
                 _log.debug("Empty Object List Will Attempt Reading One By One")
             else:
                 print("Empty Object List Will Attempt Reading One By One")
-            
+
             try:
                 # read the length
                 object_list_length = await app.read_property(
@@ -240,7 +263,7 @@ class SampleCmd(Cmd):
                         array_index=i + 1,
                     )
                     object_list.append(object_identifier)
-                    
+
             except ErrorRejectAbortNack as err:
                 if show_warnings:
                     _log.error(
@@ -250,10 +273,10 @@ class SampleCmd(Cmd):
         # loop thru each object and attempt to tease out the name
         for object_identifier in object_list:
             object_class = vendor_info.get_object_class(object_identifier[0])
-            
+
             if _debug:
                 _log.debug("    - object_class: %r", object_class)
-                
+
             if object_class is None:
                 if show_warnings:
                     _log.error(f"unknown object type: {object_identifier}\n")
@@ -271,10 +294,10 @@ class SampleCmd(Cmd):
                     _log.debug(f" {object_identifier}: {property_value}")
                 else:
                     print(f" {object_identifier}: {property_value}")
-                    
+
                 property_value_str = f"{property_value}"
                 names_list.append(property_value_str)
-                
+
             except ErrorRejectAbortNack as err:
                 if show_warnings:
                     _log.error(
@@ -284,7 +307,7 @@ class SampleCmd(Cmd):
         if _debug:
             _log.debug("    - object_list: %r", object_list)
             _log.debug("    - names_list: %r", names_list)
-            
+
         return device_address, object_list, names_list
 
     async def do_read_point_names(
@@ -305,9 +328,9 @@ class SampleCmd(Cmd):
         except ErrorRejectAbortNack as err:
             if show_warnings:
                 _log.error(f"{object_identifier} property-list error: {err}\n")
-                    
+
         for object_identifier in property_list:
-            
+
             if _debug:
                 _log.debug(
                     "do_read_point_names %r %r %r",
@@ -332,7 +355,6 @@ class SampleCmd(Cmd):
 
             except Exception as e:
                 _log.error(f"Other error while doing operation: {e}")
-
 
     async def do_read_point_priority_arr(
         self,
@@ -380,7 +402,6 @@ class SampleCmd(Cmd):
 
         except Exception as e:
             _log.error(f"Other error while doing operation: {e}")
-
 
     async def do_read(
         self,
@@ -601,7 +622,7 @@ class SampleCmd(Cmd):
         """
         print(f" args {args}")
         args_list: List[str] = list(args)
-        
+
         print(f" args_list {args_list}")
 
         # get information about the device from the cache
@@ -646,7 +667,10 @@ class SampleCmd(Cmd):
                     )
                     if _debug:
                         _log.debug("    - property_type: %r", property_type)
-                        _log.debug("    - property_reference.propertyIdentifier: %r", property_reference.propertyIdentifier)
+                        _log.debug(
+                            "    - property_reference.propertyIdentifier: %r",
+                            property_reference.propertyIdentifier,
+                        )
                     if not property_type:
                         _log.debug(
                             f"unrecognized property: {property_reference.propertyIdentifier}"
@@ -663,14 +687,12 @@ class SampleCmd(Cmd):
             # save this as a parameter
             parameter_list.append(property_reference_list)
 
-
         if not parameter_list:
             await self.response("object identifier expected")
             return
 
         try:
-            
-                
+
             response = await app.read_property_multiple(address, parameter_list)
 
         except ErrorRejectAbortNack as err:
@@ -733,11 +755,10 @@ class SampleCmd(Cmd):
                         _log.debug(f"    description: {device_description}")
                     else:
                         print(f"description: {device_description}")
-                    
+
                 except ErrorRejectAbortNack as err:
                     if show_warnings:
                         _log.error(f"{device_identifier} description error: {err}\n")
-
 
     async def do_who_is_router_to_network(
         self, address: Optional[Address] = None, network: Optional[int] = None
@@ -750,9 +771,9 @@ class SampleCmd(Cmd):
             _log.debug("do_wirtn %r %r", address, network)
         assert app.nse
 
-        result_list: List[
-            Tuple[NetworkAdapter, IAmRouterToNetwork]
-        ] = await app.nse.who_is_router_to_network(destination=address, network=network)
+        result_list: List[Tuple[NetworkAdapter, IAmRouterToNetwork]] = (
+            await app.nse.who_is_router_to_network(destination=address, network=network)
+        )
         if _debug:
             _log.debug("    - result_list: %r", result_list)
         if not result_list:

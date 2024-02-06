@@ -36,12 +36,13 @@ logging.basicConfig(level=logging.DEBUG)
 
 _debug = 0
 
+
 class ReaderApp:
     def __init__(self, args, app_status):
 
         self.current_file_date = datetime.today().date()
         self.lock = asyncio.Lock()
-        
+
         super().__init__()
 
         # embed the bacpypes BACnet application
@@ -49,24 +50,23 @@ class ReaderApp:
         self.app_status = app_status
         self.app.add_object(app_status)
         self.app_state = "active"
-        
+
         self.devices_config = self.load_yaml_config("configs/bacnet_config_201201.yaml")
-        
+
         # Start the openleadr client
         asyncio.create_task(self.dataset_maker())
 
         # create a task to update the values
         asyncio.create_task(self.update_bacnet_server_values())
-        
+
         # Add the system metrics logging task
         asyncio.create_task(self.log_system_metrics())
-        
+
     async def share_data_to_bacnet_server(self):
         # BACnet server processes
         # not used at the moment but could be if some external
         # platform monitored the state via BACnet
         return self.app_state
-
 
     async def update_bacnet_server_values(self):
         # BACnet server processes
@@ -76,21 +76,24 @@ class ReaderApp:
             await asyncio.sleep(1)
             self.app_status.presentValue = await self.share_data_to_bacnet_server()
 
-
     def load_yaml_config(self, filename):
         try:
-            with open(filename, 'r') as file:
+            with open(filename, "r") as file:
                 config = yaml.safe_load(file)
 
             for device in config["devices"]:
                 device["address"] = Address(device["address"])
 
                 for point in device["points"]:
-                    obj_id_parts = point["object_identifier"].split(',')
+                    obj_id_parts = point["object_identifier"].split(",")
                     if len(obj_id_parts) == 2:
-                        point["object_identifier"] = ObjectIdentifier(f"{obj_id_parts[0]},{int(obj_id_parts[1])}")
+                        point["object_identifier"] = ObjectIdentifier(
+                            f"{obj_id_parts[0]},{int(obj_id_parts[1])}"
+                        )
                     else:
-                        logging.error(f"Invalid object identifier format: {point['object_identifier']}")
+                        logging.error(
+                            f"Invalid object identifier format: {point['object_identifier']}"
+                        )
 
             return config
 
@@ -98,25 +101,23 @@ class ReaderApp:
             logging.error(f"Error loading YAML config: {e}")
             raise
 
-    
     async def log_system_metrics(self):
         while True:
             timestamp = datetime.now().isoformat()
             cpu_usage = psutil.cpu_percent(interval=1)
             memory_usage = psutil.virtual_memory().percent
-            disk_usage = psutil.disk_usage('/').percent
+            disk_usage = psutil.disk_usage("/").percent
             # Add more metrics if needed
 
             system_metrics = [
-                (timestamp, 'Pi_CPU_Usage', cpu_usage),
-                (timestamp, 'Pi_Memory_Usage', memory_usage),
-                (timestamp, 'Pi_Disk_Usage', disk_usage),
+                (timestamp, "Pi_CPU_Usage", cpu_usage),
+                (timestamp, "Pi_Memory_Usage", memory_usage),
+                (timestamp, "Pi_Disk_Usage", disk_usage),
                 # Add more metrics here
             ]
 
             await self.write_to_csv(system_metrics, is_system_metrics=True)
             await asyncio.sleep(3600)
-            
 
     async def write_to_csv(self, data, is_system_metrics=False):
         current_date = datetime.today().date()
@@ -131,8 +132,12 @@ class ReaderApp:
             # Rename and move the existing file to the archived directory
             existing_file_path = os.path.join(data_dir, "bacnet_data.csv")
             if os.path.exists(existing_file_path):
-                archived_file_name = f"bacnet_data_{self.current_file_date.strftime('%Y_%m_%d')}.csv"
-                archived_file_path = os.path.join(archived_directory, archived_file_name)
+                archived_file_name = (
+                    f"bacnet_data_{self.current_file_date.strftime('%Y_%m_%d')}.csv"
+                )
+                archived_file_path = os.path.join(
+                    archived_directory, archived_file_name
+                )
                 os.rename(existing_file_path, archived_file_path)
 
             # Update the current file date
@@ -144,18 +149,21 @@ class ReaderApp:
         # Thread safety attempt with asyncio Lock
         async with self.lock:
             # Check if the file exists and has content
-            file_exists = os.path.exists(csv_file_path) and os.path.getsize(csv_file_path) > 0
+            file_exists = (
+                os.path.exists(csv_file_path) and os.path.getsize(csv_file_path) > 0
+            )
 
             async with aiofiles.open(csv_file_path, mode="a", newline="") as file:
                 if not file_exists and not is_system_metrics:
                     await file.write(",".join(["Time", "Point Name", "Value"]) + "\n")
 
                 for timestamp, metric_name, metric_value in data:
-                    await file.write(",".join([timestamp, metric_name, str(metric_value)]) + "\n")
+                    await file.write(
+                        ",".join([timestamp, metric_name, str(metric_value)]) + "\n"
+                    )
 
             logging.info("CSV WRITER DONE!!!")
 
-        
     async def do_read_property_task(self, requests):
         read_values = []
         logging.info(f" requests {requests} ")
@@ -185,7 +193,6 @@ class ReaderApp:
                 read_values.append(("error", point_name))
 
         return read_values
-
 
     async def read_property_multiple_task(self, address, *args):
         logging.debug(f"args: {args}")
@@ -239,7 +246,10 @@ class ReaderApp:
                     )
                     if _debug:
                         logging.debug("    - property_type: %r", property_type)
-                        logging.debug("    - property_reference.propertyIdentifier: %r", property_reference.propertyIdentifier)
+                        logging.debug(
+                            "    - property_reference.propertyIdentifier: %r",
+                            property_reference.propertyIdentifier,
+                        )
                     if not property_type:
                         logging.debug(
                             f"unrecognized property: {property_reference.propertyIdentifier}"
@@ -256,13 +266,12 @@ class ReaderApp:
             # save this as a parameter
             parameter_list.append(property_reference_list)
 
-
         if not parameter_list:
             await self.response("object identifier expected")
             return
 
         try:
-            
+
             response = await self.app.read_property_multiple(address, parameter_list)
 
         except ErrorRejectAbortNack as err:
@@ -289,48 +298,66 @@ class ReaderApp:
                 logging.debug(
                     f" rpm error - {property_value.errorClass}, {property_value.errorCode}"
                 )
-        
+
         return response
 
-    def format_rpm_data(self, rpm_data, timestamp):
-        formatted_data = []
-        for obj_identifier, prop_identifier, _, value in rpm_data:
-            # Extract the object type and instance number
-            obj_type, instance = obj_identifier
-            point_name = f"{obj_type},{instance}_{prop_identifier}"
+    def format_rpm_data(self, rpm_data, timestamp, point_names, device_name):
+        logging.info(f"point_names: {point_names}")
+        logging.info(f"rpm_data: {rpm_data}")
 
-            formatted_data.append((timestamp, point_name, value))
+        formatted_data = []
+
+        # Ensure the two lists are of the same length
+        if len(rpm_data) != len(point_names):
+            logging.error("rpm_data and point_names have different lengths")
+            return []
+
+        for (_, _, _, value), point_name in zip(rpm_data, point_names):
+            # Format point_data using device_name and point_name
+            point_data = f"{device_name}_{point_name}"
+
+            formatted_data.append((timestamp, point_data, value))
 
         return formatted_data
 
-
     async def scrape_device(self, device_config):
-        scrape_interval = device_config['scrape_interval']
-        read_multiple = device_config.get('read_multiple', False)
-        device_address = device_config['address']
+        scrape_interval = device_config["scrape_interval"]
+        read_multiple = device_config.get("read_multiple", False)
+        device_address = device_config["address"]
         device_name = device_config["device_name"]
 
         while True:
             if read_multiple:
+
+                point_names = [
+                    point["object_name"] for point in device_config["points"]
+                ]
+
                 # Define device_requests for RPM in the flattened format
                 device_requests = []
-                for point in device_config['points']:
+                for point in device_config["points"]:
                     # Assuming point['object_identifier'] is a tuple-like ObjectIdentifier
-                    object_type, instance = point['object_identifier']
+                    object_type, instance = point["object_identifier"]
 
                     # Format object_type and instance into the required string format
                     object_type_instance_str = f"{object_type},{instance}"
 
                     # Add to the device_requests
-                    device_requests.extend([object_type_instance_str, BACNET_PRESENT_VALUE_PROP_IDENTIFIER])
+                    device_requests.extend(
+                        [object_type_instance_str, BACNET_PRESENT_VALUE_PROP_IDENTIFIER]
+                    )
 
                 # Call read_property_multiple_task with unpacked arguments
-                data = await self.read_property_multiple_task(device_address, *device_requests)
+                data = await self.read_property_multiple_task(
+                    device_address, *device_requests
+                )
                 logging.info(f" rpm data: {data}")
 
                 if data is not None:
                     timestamp = datetime.now().isoformat()
-                    formatted_data = self.format_rpm_data(data, timestamp)
+                    formatted_data = self.format_rpm_data(
+                        data, timestamp, point_names, device_name
+                    )
                     logging.info(f"time: {timestamp}, data: {formatted_data}")
 
                     await self.write_to_csv(formatted_data, is_system_metrics=False)
@@ -338,31 +365,38 @@ class ReaderApp:
             else:
                 # Define device_requests for non-RPM
                 device_requests = [
-                    (device_address, ObjectIdentifier(point['object_identifier']), 
-                    BACNET_PRESENT_VALUE_PROP_IDENTIFIER, BACNET_PROPERTY_ARRAY_INDEX, 
-                    f"{device_name}_{point['object_name'].lower()}")
-                    for point in device_config['points']
+                    (
+                        device_address,
+                        ObjectIdentifier(point["object_identifier"]),
+                        BACNET_PRESENT_VALUE_PROP_IDENTIFIER,
+                        BACNET_PROPERTY_ARRAY_INDEX,
+                        f"{device_name}_{point['object_name'].lower()}",
+                    )
+                    for point in device_config["points"]
                 ]
-                
+
                 data = await self.do_read_property_task(device_requests)
                 logging.info(f" no rpm data: {data}")
-                
+
                 if data is not None:
                     timestamp = datetime.now().isoformat()
-                    data_with_timestamp = [(timestamp, point_name, value) for value, point_name in data]
+                    data_with_timestamp = [
+                        (timestamp, point_name, value) for value, point_name in data
+                    ]
                     logging.info(f"time: {timestamp}, data: {data_with_timestamp}")
 
-                    await self.write_to_csv(data_with_timestamp, is_system_metrics=False)
-            
-            await asyncio.sleep(scrape_interval)
+                    await self.write_to_csv(
+                        data_with_timestamp, is_system_metrics=False
+                    )
 
+            await asyncio.sleep(scrape_interval)
 
     async def dataset_maker(self):
         tasks = []
         for device_config in self.devices_config["devices"]:
             task = asyncio.create_task(self.scrape_device(device_config))
             tasks.append(task)
-        
+
         await asyncio.gather(*tasks)
 
 
@@ -386,6 +420,7 @@ async def main():
     logging.debug("app: %r", app)
 
     await asyncio.Future()
+
 
 if __name__ == "__main__":
     try:
