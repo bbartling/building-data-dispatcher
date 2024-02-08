@@ -25,8 +25,13 @@ from typing import Callable, List, Optional, Tuple
 import yaml
 import traceback
 
-# examples args for bacpypes3. Run like:
-# $ python3 app.py --name Slipstream --instance 3056672 --address 10.7.6.201/24:47820
+'''
+git REV v0.2.4
+
+pip install aiofiles bacpypes3 pyyaml psutil ifaddr
+examples args for bacpypes3. Run like:
+$ python3 app.py --name Slipstream --instance 3056672 --address 10.7.6.201/24:47820
+'''
 
 # Define BACnet properties
 BACNET_PRESENT_VALUE_PROP_IDENTIFIER = "present-value"
@@ -49,9 +54,10 @@ class ReaderApp:
         self.app = Application.from_args(args)
         self.app_status = app_status
         self.app.add_object(app_status)
-        self.app_state = "active"
+        self.app_state = "inactive"
 
-        self.devices_config = self.load_yaml_config("configs/bacnet_config_201201.yaml")
+        # hard coded to loop thru the configs directory
+        self.devices_configs = self.load_all_yaml_configs("configs")
 
         # Start the openleadr client
         asyncio.create_task(self.dataset_maker())
@@ -75,6 +81,17 @@ class ReaderApp:
         while True:
             await asyncio.sleep(1)
             self.app_status.presentValue = await self.share_data_to_bacnet_server()
+
+    def load_all_yaml_configs(self, directory):
+        configs = []
+        for filename in os.listdir(directory):
+            if filename.endswith(".yaml"):
+                try:
+                    configs.append(self.load_yaml_config(os.path.join(directory, filename)))
+                except Exception as e:
+                    logging.error(f"Error loading YAML config '{filename}': {e}")
+
+        return configs
 
     def load_yaml_config(self, filename):
         try:
@@ -100,6 +117,7 @@ class ReaderApp:
         except Exception as e:
             logging.error(f"Error loading YAML config: {e}")
             raise
+
 
     async def log_system_metrics(self):
         while True:
@@ -393,9 +411,10 @@ class ReaderApp:
 
     async def dataset_maker(self):
         tasks = []
-        for device_config in self.devices_config["devices"]:
-            task = asyncio.create_task(self.scrape_device(device_config))
-            tasks.append(task)
+        for device_config in self.devices_configs:
+            for device in device_config["devices"]:
+                task = asyncio.create_task(self.scrape_device(device))
+                tasks.append(task)
 
         await asyncio.gather(*tasks)
 
@@ -406,10 +425,10 @@ async def main():
 
     app_status = BinaryValueObject(
         objectIdentifier=("binaryValue", 1),
-        objectName="cloud-dr-server-state",
-        presentValue="active",
+        objectName="app-error-state",
+        presentValue="inactive",
         statusFlags=[0, 0, 0, 0],
-        description="True if app can reach to cloud DR server",
+        description="True if app has error",
     )
 
     # instantiate the ReaderApp with test_av and test_bv

@@ -29,27 +29,34 @@ This command triggers the discovery of BACnet points associated with the device 
 
 
 ## YAML File Structure
-The generated YAML file contains a structured representation of the BACnet device's points. The structure includes:
+The generated YAML file contains a structured representation of the BACnet device's points which should be trimmed down and customized with a text editor. The structure includes:
 
 * The BACnet device address.
 * Device identifier.
 * A list of points with their BACnet object identifiers and names.
-* Default scrape interval and read multiple settings.
+* Default scrape interval and BACnet read multiple settings. Recommended to use BACnet read multiple if scraping lots of points and not less than a 60 second scrape interval especially if there is a large site with lots of points.
+* Trim points scrape down to only useful data where each `point` needs a matching `object_identifier` and `object_name`.
+* Inspect each row of the YAML file `points:` for an `ERROR` which can happen occasionally bacpypes may throw a `bacpypes3.errors.InvalidTag` when doing a point discovery on a device.
 
 Example YAML content:
 ```bash
 devices:
-- address: '12345:2'
-  device_identifier: '201201'
-  scrape_interval: 60
-  read_multiple: true
+- address: '12:40'
+  device_identifier: '601040'
+  device_name: MTR-01 BACnet
   points:
-    - object_identifier: 'analog-input,1'
-      object_name: 'tempUoOne10k'
-    - object_identifier: 'analog-input,2'
-      object_name: 'tempUoTwoBalco'
-    # ... more points ...
-
+  - object_identifier: analog-input,8
+    object_name: Outlet Setp. 1
+  - object_identifier: analog-input,9
+    object_name: Outlet Temp. 1
+  - object_identifier: analog-input,10
+    object_name: Inlet Temp. 1
+  - object_identifier: analog-input,11
+    object_name: Flue1/Pool Temp.
+  - object_identifier: analog-input,11
+    object_name: Firing Rate 1
+  read_multiple: true
+  scrape_interval: 600
 ```
 
 ## TODO is make readme for `app.py`

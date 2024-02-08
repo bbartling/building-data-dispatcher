@@ -1,5 +1,5 @@
 """
-Example usage
+Example usage git REV v0.2.4
 
 Bring up the bacpypes3 console with debug
 $ python3 tester.py --debug
@@ -63,6 +63,7 @@ from bacpypes3.comm import bind
 
 from bacpypes3.primitivedata import Integer
 from bacpypes3.basetypes import PriorityValue
+import bacpypes3
 
 from bacpypes3.debugging import bacpypes_debugging, ModuleLogger
 from bacpypes3.argparse import SimpleArgumentParser
@@ -120,8 +121,9 @@ class SampleCmd(Cmd):
 
     _debug: Callable[..., None]
 
-    async def do_save_device_config(self, instance_id: int, filename=None):
+    async def do_save_device_yaml_config(self, instance_id: int, filename=None):
         """
+        For python bacnet-csv-logger
         Save the discovered points to a YAML file, named based on the instance ID,
         including the device name for the device identifier entry.
         If the device name is not found, default to the instance ID as a string.
@@ -137,6 +139,11 @@ class SampleCmd(Cmd):
         )
         if not object_list:
             return
+
+        if _debug:
+            _log.debug(f" device_address {device_address}")
+            _log.debug(f" len object_list {len(object_list)}")
+            _log.debug(f" len names_list {len(names_list)}")
 
         # Combine object_list and names_list into a single structure
         points_data = []
@@ -164,36 +171,27 @@ class SampleCmd(Cmd):
 
             if type_name == "device" and obj_id == instance_id:
                 device_name = name
-                break  # Found the device name
+                continue
 
-        config_data = OrderedDict(
-            [
-                (
-                    "devices",
-                    [
-                        OrderedDict(
-                            [
-                                ("device_identifier", str(instance_id)),
-                                (
-                                    "device_name",
-                                    device_name,
-                                ),  # Add device name or instance_id here
-                                ("address", str(device_address)),
-                                ("scrape_interval", 60),  # Default value
-                                ("read_multiple", True),  # Default value
-                                ("points", points_data),
-                            ]
-                        )
-                    ],
-                )
-            ]
-        )
+        config_data = {
+            "devices": [
+                {
+                    "device_identifier": str(instance_id),
+                    "device_name": device_name,  # Add device name or instance_id here
+                    "address": str(device_address),
+                    "scrape_interval": 60,  # Default value
+                    "read_multiple": True,  # Default value
+                    "points": points_data,
+                }
+            ],
+        }
 
         with open(filename, "w") as file:
             yaml.dump(config_data, file, default_flow_style=False)
 
         if _debug:
             _log.debug(f"Configuration for device {instance_id} saved to {filename}")
+
 
     async def do_point_discovery(
         self,
@@ -230,20 +228,20 @@ class SampleCmd(Cmd):
 
         except AbortPDU as err:
             if err.apduAbortRejectReason != AbortReason.segmentationNotSupported:
-                if show_warnings:
-                    _log.error(f"{device_identifier} object-list abort: {err}\n")
+                _log.error(f"{device_identifier} object-list abort: {err}\n")
                 return []
         except ErrorRejectAbortNack as err:
-            if show_warnings:
-                _log.error(f"{device_identifier} object-list error/reject: {err}\n")
+            _log.error(f"{device_identifier} object-list error/reject: {err}\n")
             return []
 
         if not object_list:
 
             if _debug:
-                _log.debug("Empty Object List Will Attempt Reading One By One")
+                _log.debug(" Empty Object List Will Attempt Reading One By One")
+                _log.debug(" This may take a minute....")
             else:
-                print("Empty Object List Will Attempt Reading One By One")
+                print(" Empty Object List Will Attempt Reading One By One")
+                print(" This may take a minute....")
 
             try:
                 # read the length
@@ -265,10 +263,9 @@ class SampleCmd(Cmd):
                     object_list.append(object_identifier)
 
             except ErrorRejectAbortNack as err:
-                if show_warnings:
-                    _log.error(
-                        f"{device_identifier} object-list length error/reject: {err}\n"
-                    )
+                _log.error(
+                    f"{device_identifier} object-list length error/reject: {err}\n"
+                )
 
         # loop thru each object and attempt to tease out the name
         for object_identifier in object_list:
@@ -278,8 +275,7 @@ class SampleCmd(Cmd):
                 _log.debug("    - object_class: %r", object_class)
 
             if object_class is None:
-                if show_warnings:
-                    _log.error(f"unknown object type: {object_identifier}\n")
+                _log.error(f"unknown object type: {object_identifier}\n")
                 continue
 
             if _debug:
@@ -298,11 +294,14 @@ class SampleCmd(Cmd):
                 property_value_str = f"{property_value}"
                 names_list.append(property_value_str)
 
+            except bacpypes3.errors.InvalidTag as err:
+                _log.error(f"Invalid Tag Error on point: {device_identifier}")
+                names_list.append("ERROR - Delete this row")
+
             except ErrorRejectAbortNack as err:
-                if show_warnings:
-                    _log.error(
-                        f"{object_identifier} {object_identifier} error: {err}\n"
-                    )
+                _log.error(
+                    f"{object_identifier} {object_identifier} error: {err}\n"
+                )
 
         if _debug:
             _log.debug("    - object_list: %r", object_list)
@@ -326,7 +325,7 @@ class SampleCmd(Cmd):
             if _debug:
                 _log.debug("    - property_list: %r", property_list)
         except ErrorRejectAbortNack as err:
-            if show_warnings:
+            
                 _log.error(f"{object_identifier} property-list error: {err}\n")
 
         for object_identifier in property_list:
@@ -757,8 +756,7 @@ class SampleCmd(Cmd):
                         print(f"description: {device_description}")
 
                 except ErrorRejectAbortNack as err:
-                    if show_warnings:
-                        _log.error(f"{device_identifier} description error: {err}\n")
+                    _log.error(f"{device_identifier} description error: {err}\n")
 
     async def do_who_is_router_to_network(
         self, address: Optional[Address] = None, network: Optional[int] = None
