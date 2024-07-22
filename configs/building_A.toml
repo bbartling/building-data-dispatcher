@@ -1,0 +1,42 @@
+base_url = "http://100.234.23.125:5000"
+scrape_interval = 60
+
+[building]
+name = "Building A"
+location = "Campus 1"
+
+[[devices]]
+device_instance = 10
+brick_class = "VAV"
+location = "Room 101"
+feeds = ["AHU1"]
+
+[[devices.points]]
+object_identifier = "analog-input,1019"
+property_identifier = "present-value"
+description = "Discharge Air Temperature (DA-T)"
+brick_class = "Discharge_Air_Temperature_Sensor"
+
+[[devices.points]]
+object_identifier = "analog-input,1106"
+property_identifier = "present-value"
+description = "Zone Temperature (ZN-T)"
+brick_class = "Zone_Temperature_Sensor"
+
+[[devices]]
+device_instance = 20
+brick_class = "AHU"
+location = "Building A"
+feeds = ["VAV1", "VAV2"]
+
+[[devices.points]]
+object_identifier = "analog-output,2014"
+property_identifier = "present-value"
+description = "Heating Valve Output (HTG-O)"
+brick_class = "Heating_Valve"
+
+[[devices.points]]
+object_identifier = "analog-output,2131"
+property_identifier = "present-value"
+description = "Air Damper Output (DPR-O)"
+brick_class = "Air_Damper"
